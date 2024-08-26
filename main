@@ -1,0 +1,101 @@
+import os
+import random
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
+
+# Здесь нужно будет поменять пути в зависимости от того, куда будут добавлены все нужные файлы
+START_IMAGE_PATH = r'C:\Users\wotur\Desktop\anime_start\start.jpg'
+IMAGES_DIR = r'C:\Users\wotur\Desktop\anime_images'
+LEVEL_DIR = r'C:\Users\wotur\Desktop\anime_level'
+ANIME_LIST_PATH = r'C:\Users\wotur\Desktop\anime_list.txt'
+
+# Читаем список аниме
+with open(ANIME_LIST_PATH, 'r', encoding='utf-8') as f:
+    anime_list = f.read().splitlines()
+
+# Начинаем работу с ботом, отправляя юзеру стартовую картинку и предлагая пройти квиз
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    keyboard = [[InlineKeyboardButton("Пройти аниме квиз", callback_data='start_quiz')]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await context.bot.send_photo(chat_id=update.effective_chat.id, photo=open(START_IMAGE_PATH, 'rb'))
+    await update.message.reply_text('Привет! Хочешь узнать, насколько ты знаешь аниме?', reply_markup=reply_markup)
+
+# Обрабатываем выбор пользователя и начинаем квиз
+async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == 'start_quiz':
+        context.user_data['correct_answers'] = 0
+        context.user_data['current_question'] = 0
+        await send_question(update, context)
+    elif query.data.startswith('answer_'):
+        _, correct = query.data.split('_')
+        if correct == 'yes':
+            context.user_data['correct_answers'] += 1
+
+        context.user_data['current_question'] += 1
+
+        if context.user_data['current_question'] < 10:
+            await send_question(update, context)
+        else:
+            await show_results(update, context)
+    elif query.data == 'exit_quiz':
+        await query.edit_message_text('Ты вышел из квиза. Можешь попробовать снова позже.')
+
+# Отправляем юзеру следующий вопрос
+async def send_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    image_file = random.choice(os.listdir(IMAGES_DIR))
+    correct_answer = os.path.splitext(image_file)[0]
+
+    wrong_answers = random.sample([anime for anime in anime_list if anime != correct_answer], 3)
+    answers = wrong_answers + [correct_answer]
+    random.shuffle(answers)
+
+    keyboard = [
+        [InlineKeyboardButton(answers[i], callback_data=f'answer_{"yes" if answers[i] == correct_answer else "no"}')]
+        for i in range(4)
+    ]
+    keyboard.append([InlineKeyboardButton("Выйти", callback_data='exit_quiz')])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    # Отправляем новое сообщение с фото и кнопками
+    await context.bot.send_photo(chat_id=update.effective_chat.id, photo=open(os.path.join(IMAGES_DIR, image_file), 'rb'))
+    await context.bot.send_message(chat_id=update.effective_chat.id, text='Как называется это аниме?', reply_markup=reply_markup)
+
+# Показываем результаты после завершения квиза
+async def show_results(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    correct_answers = context.user_data['correct_answers']
+    if correct_answers <= 2:
+        level = '0-2.jpg'
+        text = 'Ты пока лошок, иди смотреть классику и возвращайся, чтобы изменить мое мнение о тебе.'
+    elif correct_answers <= 4:
+        level = '3-4.jpg'
+        text = 'На этот раз тебе повезло, но ты все еще не достоин.'
+    elif correct_answers <= 6:
+        level = '5-6.jpg'
+        text = 'Макима одобряет, но тебе нужно больше своей жизни уделять аниме, если хочешь, чтобы тебя хоть иногда звали на нефорские тусовки.'
+    elif correct_answers <= 8:
+        level = '7-8.jpg'
+        text = 'Получается, ты у нас S ранга что ли...'
+    else:
+        level = '9-10.jpg'
+        text = 'Кто ты, воин? Тебе бы пора создать свое аниме. По оценке бота ты на все 100% нефор, теперь живи с этим.'
+
+    keyboard = [[InlineKeyboardButton("Пройти квиз снова", callback_data='start_quiz')],
+                [InlineKeyboardButton("Выйти", callback_data='exit_quiz')]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await context.bot.send_photo(chat_id=update.effective_chat.id, photo=open(os.path.join(LEVEL_DIR, level), 'rb'))
+    await context.bot.send_message(chat_id=update.effective_chat.id, text=text, reply_markup=reply_markup)
+
+
+if __name__ == '__main__':
+    # Создаем приложение и регистрируем обработчики
+    application = ApplicationBuilder().token('токен').build()
+
+    application.add_handler(CommandHandler('start', start))
+    application.add_handler(CallbackQueryHandler(button))
+
+    application.run_polling()
